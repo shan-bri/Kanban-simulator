@@ -1,0 +1,894 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kanban Line Simulator</title>
+<style>html,body{margin:0} img{max-width:100%}</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: shop-floor control panel. Tab bar; model tab = settings rail + line diagram, gauges, trend, cycle-time study. */
+:root{
+  --bg:#EEF1F4; --surface:#FFFFFF; --sunk:#E4E9EE; --ink:#16202A; --muted:#566371; --line:#CED6DE;
+  --steel:#2F4A63; --steel-ink:#FFFFFF;
+  --ckan:#2C6FB7; --pkan:#C27A00; --back:#7A4FB5; --card-c:#E3EEFA; --card-p:#FBEFD9;
+  --good:#2E7D4F; --warn:#A86A12; --bad:#B93A12;
+  --good-bg:#E3F2E8; --warn-bg:#FBF0DC; --bad-bg:#FBE6DE;
+  --f-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"Source Sans 3","Segoe UI",system-ui,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0E141A; --surface:#161F28; --sunk:#1D2833; --ink:#E4EAF0; --muted:#97A5B3; --line:#2B3846;
+  --steel:#8DB4D9; --steel-ink:#0E141A;
+  --ckan:#5A93D6; --pkan:#D08E22; --back:#9C78D8; --card-c:#1C3048; --card-p:#3A2C12;
+  --good:#5CC28A; --warn:#E0B050; --bad:#F07A4F; --good-bg:#16301F; --warn-bg:#33280F; --bad-bg:#3A1C12;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E141A; --surface:#161F28; --sunk:#1D2833; --ink:#E4EAF0; --muted:#97A5B3; --line:#2B3846;
+  --steel:#8DB4D9; --steel-ink:#0E141A;
+  --ckan:#5A93D6; --pkan:#D08E22; --back:#9C78D8; --card-c:#1C3048; --card-p:#3A2C12;
+  --good:#5CC28A; --warn:#E0B050; --bad:#F07A4F; --good-bg:#16301F; --warn-bg:#33280F; --bad-bg:#3A1C12;
+  color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5}
+.wrap{max-width:1320px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:18px 48px}
+header.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 24px;border-bottom:2px solid var(--ink);padding-bottom:12px}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(28px,4vw,40px);line-height:1;margin:0;letter-spacing:.01em;text-transform:uppercase}
+.sub{color:var(--muted);margin:6px 0 0;font-size:15px}
+.tag{font-family:var(--f-mono);font-size:12px;border:1px solid var(--line);padding:2px 8px;border-radius:3px;color:var(--muted)}
+nav.tabs{display:flex;gap:4px;flex-wrap:wrap;margin:14px 0 18px}
+nav.tabs button{font-family:var(--f-display);font-size:18px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;background:transparent;border:1px solid var(--line);color:var(--muted);padding:6px 16px;border-radius:3px;cursor:pointer}
+nav.tabs button[aria-selected="true"]{background:var(--steel);color:var(--steel-ink);border-color:var(--steel)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--ckan);outline-offset:2px}
+h2{font-family:var(--f-display);font-size:24px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;margin:0 0 8px;text-wrap:balance}
+h3{font-family:var(--f-display);font-size:19px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;margin:0 0 6px}
+.label{font-family:var(--f-display);text-transform:uppercase;letter-spacing:.06em;font-size:13px;color:var(--muted);font-weight:600}
+.mono,.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+
+/* model grid */
+.model{display:grid;grid-template-columns:300px minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:900px){.model{grid-template-columns:minmax(0,1fr)} aside.rail{order:2}}
+aside.rail{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:14px;display:flex;flex-direction:column;gap:14px}
+fieldset{border:0;border-top:1px solid var(--line);margin:0;padding:10px 0 0;display:grid;grid-template-columns:1fr 1fr;gap:8px 10px}
+legend{font-family:var(--f-display);text-transform:uppercase;letter-spacing:.06em;font-size:14px;font-weight:700;padding-right:8px}
+.fld{display:flex;flex-direction:column;gap:2px;min-width:0}
+.fld.wide{grid-column:1/-1}
+.fld label{font-size:12.5px;color:var(--muted);line-height:1.25}
+.fld input,.fld select{font-family:var(--f-mono);font-size:14px;padding:5px 7px;border:1px solid var(--line);border-radius:3px;background:var(--bg);color:var(--ink);width:100%}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-radius:3px;overflow:hidden}
+.seg button{background:var(--bg);border:0;border-right:1px solid var(--line);color:var(--ink);font-family:var(--f-body);font-size:13px;font-weight:600;padding:7px 4px;cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--steel);color:var(--steel-ink)}
+.hint{font-size:12.5px;color:var(--muted);margin:0;grid-column:1/-1}
+.btn{font-family:var(--f-body);font-weight:700;font-size:14px;padding:7px 12px;border-radius:3px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+.btn.primary{background:var(--steel);color:var(--steel-ink);border-color:var(--steel)}
+.btn:disabled{opacity:.5;cursor:default}
+.main{display:flex;flex-direction:column;gap:16px;min-width:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:14px;min-width:0}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.clock{font-family:var(--f-mono);font-size:15px;margin-left:auto;padding:4px 10px;background:var(--sunk);border-radius:3px}
+.diagram{overflow-x:auto}
+.diagram svg{display:block;width:100%;min-width:640px;height:auto}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.kpi{border:1px solid var(--line);border-radius:4px;padding:10px 12px;background:var(--surface);display:flex;flex-direction:column;gap:2px}
+.kpi .v{font-family:var(--f-mono);font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}
+.kpi .s{font-size:12.5px;color:var(--muted)}
+.pill{align-self:flex-start;font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:10px;letter-spacing:.02em}
+.pill.good{background:var(--good-bg);color:var(--good)}.pill.warn{background:var(--warn-bg);color:var(--warn)}.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.chartwrap{position:relative}
+canvas#chart{width:100%;height:260px;display:block}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted);margin-bottom:6px}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:6px 9px;font-size:12.5px;box-shadow:0 2px 8px rgba(0,0,0,.12);white-space:nowrap}
+.tip .num{font-weight:600}
+.twocol{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.tbl-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--f-display);text-transform:uppercase;letter-spacing:.05em;font-size:13px;color:var(--muted);font-weight:600}
+td.n,th.n{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+tr.tot td{font-weight:700;border-top:2px solid var(--ink)}
+.cardhead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.chip{display:inline-block;width:12px;height:16px;border-radius:2px}
+.events{font-family:var(--f-mono);font-size:12.5px;max-height:120px;overflow:auto;color:var(--muted);margin:0;padding:0;list-style:none}
+.events li{padding:2px 0;border-bottom:1px dashed var(--line)}
+
+/* activities */
+.doc{max-width:860px;display:flex;flex-direction:column;gap:18px}
+.doc p,.doc li{max-width:72ch}
+.act{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:16px 18px}
+.act header{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin-bottom:6px}
+.act header .time{font-family:var(--f-mono);font-size:13px;color:var(--muted)}
+.act ol,.act ul{padding-left:22px;margin:6px 0}
+.act li{margin:4px 0}
+.q{border-left:3px solid var(--steel);padding:6px 12px;background:var(--sunk);margin:10px 0 0;border-radius:0 3px 3px 0}
+.q b{font-family:var(--f-display);text-transform:uppercase;letter-spacing:.05em;font-size:14px}
+.kcard{display:inline-grid;grid-template-columns:auto auto;border:1.5px solid var(--ink);font-size:12.5px;font-family:var(--f-mono);background:var(--card-c)}
+.kcard span{padding:2px 8px;border-right:1px solid var(--ink);border-bottom:1px solid var(--ink)}
+.kcard span:nth-child(2n){border-right:0}
+.formula{font-family:var(--f-mono);background:var(--sunk);padding:2px 6px;border-radius:3px;white-space:nowrap}
+/* calculator */
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.calc fieldset{grid-template-columns:1fr 1fr}
+.out{font-family:var(--f-mono);font-size:14px;line-height:1.8}
+.out b{font-size:18px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:4px;font-size:14px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<header class="top">
+  <div>
+    <h1>Kanban Line Simulator</h1>
+    <p class="sub">Part M-187 Rim &middot; Station 1 Machining &rarr; Station 2 Assembly &middot; 1 day = 480 min</p>
+  </div>
+  <span class="tag">Pull production system &middot; tutorial model</span>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button role="tab" aria-selected="true" data-tab="model" id="tab-model">Model</button>
+  <button role="tab" aria-selected="false" data-tab="acts" id="tab-acts">Activities</button>
+  <button role="tab" aria-selected="false" data-tab="calc" id="tab-calc">Kanban calculator</button>
+  <button role="tab" aria-selected="false" data-tab="log" id="tab-log">Run log <span id="logcount" class="num"></span></button>
+</nav>
+
+<!-- ================= MODEL ================= -->
+<section id="pane-model" class="model">
+  <aside class="rail" aria-label="Model settings">
+    <div class="fld wide">
+      <label for="preset">Load a preset</label>
+      <select id="preset">
+        <option value="">Choose a preset&hellip;</option>
+        <option value="base">Baseline: two-card, steady demand</option>
+        <option value="a1push">Activity 1: push (MRP schedule)</option>
+        <option value="a2">Activity 2: your calculated kanbans</option>
+        <option value="a3">Activity 3: random demand</option>
+        <option value="a3bd">Activity 3: random demand + breakdowns</option>
+        <option value="a4">Activity 4: improvement challenge start</option>
+      </select>
+    </div>
+
+    <div>
+      <div class="label" style="margin-bottom:4px">Control system</div>
+      <div class="seg" role="group" aria-label="Control system">
+        <button type="button" data-mode="push" aria-pressed="false">Push (MRP)</button>
+        <button type="button" data-mode="single" aria-pressed="false">Single-card</button>
+        <button type="button" data-mode="two" aria-pressed="true">Two-card</button>
+      </div>
+    </div>
+
+    <fieldset><legend>Demand at Assembly</legend>
+      <div class="fld"><label for="D">D, planned demand (units/day)</label><input id="D" type="number" min="1" max="400" step="1"></div>
+      <div class="fld"><label for="demandPct">Actual vs plan (%)</label><input id="demandPct" type="number" min="-50" max="50" step="5"></div>
+      <div class="fld wide"><label for="pattern">Demand pattern</label>
+        <select id="pattern"><option value="steady">Steady (evenly spaced)</option><option value="random">Random (Poisson arrivals)</option></select></div>
+      <p class="hint" id="planHint">Pull ignores the plan: only actual consumption sends signals upstream.</p>
+    </fieldset>
+
+    <fieldset><legend>Containers &amp; cards</legend>
+      <div class="fld"><label for="Q">Q, container size (units)</label><input id="Q" type="number" min="1" max="50" step="1"></div>
+      <div class="fld"><label for="Kc" id="KcLab">Kc, C-kanbans</label><input id="Kc" type="number" min="0" max="40" step="1"></div>
+      <div class="fld"><label for="Kp" id="KpLab">Kp, P-kanbans</label><input id="Kp" type="number" min="0" max="40" step="1"></div>
+    </fieldset>
+
+    <fieldset><legend>Station 1 Machining</legend>
+      <div class="fld"><label for="setup">Setup per container (min)</label><input id="setup" type="number" min="0" max="240" step="1"></div>
+      <div class="fld"><label for="run">Run time (min/unit)</label><input id="run" type="number" min="0.5" max="60" step="0.5"></div>
+      <div class="fld"><label for="pInt" id="pIntLab">P-mailbox checked every (min)</label><input id="pInt" type="number" min="1" max="480" step="1"></div>
+      <div class="fld"><label for="e">e, move to outbound (min)</label><input id="e" type="number" min="0" max="120" step="1"></div>
+    </fieldset>
+
+    <fieldset><legend>Material handler</legend>
+      <div class="fld wide"><label for="hInt">Collection round every (min)</label><input id="hInt" type="number" min="1" max="480" step="1"></div>
+      <div class="fld"><label for="b">b, travel to Station 1 (min)</label><input id="b" type="number" min="0" max="240" step="1"></div>
+      <div class="fld"><label for="c">c, travel back (min)</label><input id="c" type="number" min="0" max="240" step="1"></div>
+    </fieldset>
+
+    <fieldset><legend>Disruptions</legend>
+      <div class="fld"><label for="mtbf">Mean time between breakdowns (h, 0 = off)</label><input id="mtbf" type="number" min="0" max="200" step="0.5"></div>
+      <div class="fld"><label for="mttr">Mean repair time (min)</label><input id="mttr" type="number" min="1" max="480" step="1"></div>
+    </fieldset>
+
+    <fieldset><legend>Run</legend>
+      <div class="fld"><label for="runLen">Run length</label><input id="runLen" type="number" min="1" max="480" step="1"></div>
+      <div class="fld"><label for="runUnit">Unit</label><select id="runUnit"><option value="days">days (8-h shifts)</option><option value="hours">hours</option></select></div>
+      <div class="fld wide"><label for="seed">Random seed</label><input id="seed" type="number" min="1" max="999" step="1"></div>
+      <p class="hint">Same seed = same customer orders and breakdowns, so you can compare settings fairly.</p>
+    </fieldset>
+    <p class="hint" id="capCheck"></p>
+  </aside>
+
+  <div class="main">
+    <div class="panel">
+      <div class="bar">
+        <button class="btn primary" id="play">Play</button>
+        <button class="btn" id="stepBtn" title="Advance 10 minutes">+10 min</button>
+        <button class="btn" id="finish">Run to end</button>
+        <button class="btn" id="reset">Reset</button>
+        <label class="label" for="speed" style="margin-left:6px">Speed</label>
+        <select id="speed" class="btn" style="padding:6px">
+          <option value="5">5 min/s</option><option value="15">15 min/s</option><option value="30" selected>30 min/s</option>
+          <option value="120">2 h/s</option><option value="480">1 day/s</option><option value="2400">5 days/s</option>
+        </select>
+        <span class="clock" id="clock">Day 1 &middot; 08:00</span>
+      </div>
+      <div class="diagram" id="diagram" aria-label="Animated line diagram"></div>
+      <div class="bar" style="font-size:12.5px;color:var(--muted);gap:14px">
+        <span><span class="chip" style="background:var(--ckan)"></span> C-kanban (conveyance)</span>
+        <span><span class="chip" style="background:var(--pkan)"></span> P-kanban (production)</span>
+        <span><span class="chip" style="background:var(--line);border:1px solid var(--muted)"></span> Full container of Q units</span>
+      </div>
+    </div>
+
+    <div class="kpis" id="kpis"></div>
+
+    <div class="panel">
+      <div class="bar" style="justify-content:space-between;margin-bottom:6px">
+        <h3 style="margin:0">Inventory over time (units)</h3>
+        <div class="bar">
+          <button class="btn" id="save">Save run to log</button>
+          <button class="btn" id="seeds">Run seeds 1&ndash;3 &amp; save</button>
+        </div>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--ink)"></i>Total WIP</span>
+        <span><i style="background:var(--ckan)"></i>At Assembly (inbound + open container)</span>
+        <span><i style="background:var(--pkan)"></i>At Machining (outbound)</span>
+        <span><i style="background:var(--back)"></i>Backorders</span>
+      </div>
+      <div class="chartwrap"><canvas id="chart" aria-label="Line chart of inventory over time"></canvas><div class="tip" id="tip" hidden></div></div>
+    </div>
+
+    <div class="twocol">
+      <div class="panel">
+        <div class="cardhead"><span class="chip" style="background:var(--ckan)"></span><h3 style="margin:0">C-kanban loop: measured</h3></div>
+        <div class="tbl-wrap"><table id="cTable"></table></div>
+      </div>
+      <div class="panel">
+        <div class="cardhead"><span class="chip" style="background:var(--pkan)"></span><h3 style="margin:0">P-kanban loop: measured</h3></div>
+        <div class="tbl-wrap"><table id="pTable"></table></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Shop-floor events</h3>
+      <ul class="events" id="events"></ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= ACTIVITIES ================= -->
+<section id="pane-acts" class="doc" hidden>
+  <div>
+    <h2>Tutorial activities</h2>
+    <p>Your team runs a two-station cell making the <b>M-187 rim</b>. Station 1 (Machining) fills standard containers; Station 2 (Assembly) uses one rim per customer order. Assembly demand averages <b>48 rims per 8-hour day</b>. A material handler moves containers between the stations, and the kanban card on each container looks like this:</p>
+    <div class="kcard" aria-label="Example kanban card">
+      <span>Process (from)</span><span>No. 1 Machining</span>
+      <span>Process (to)</span><span>No. 2 Assembly</span>
+      <span>Part no.</span><span>M-187 Rim</span>
+      <span>Container capacity</span><span>Q units</span>
+    </div>
+    <p>Work in groups of 3&ndash;4. Use <b>Save run to log</b> after every experiment so your results are kept in the Run log tab. Unless told otherwise, simulate <b>10 days</b> with <b>seed 1</b>.</p>
+  </div>
+
+  <article class="act">
+    <header><h3>0 &middot; Read the model</h3><span class="time">10 min</span></header>
+    <ol>
+      <li>Load the preset <b>Baseline</b>. Under <b>Run</b>, set Run length to <b>2 hours</b>. Press <b>Play</b> at 5 or 15 min/s and watch the whole run.</li>
+      <li>Follow one blue C-kanban all the way round: assembly opens a container &rarr; card goes to the C-mailbox &rarr; handler collects it &rarr; swaps it onto a full container at Machining &rarr; returns.</li>
+      <li>Follow one amber P-kanban: removed at the outbound buffer &rarr; P-mailbox &rarr; machine queue &rarr; setup and run &rarr; back on a full container.</li>
+    </ol>
+    <div class="q"><b>Check</b> Match what you saw to steps 1&ndash;6 of the two-card procedure in the lecture. Which step authorises <i>movement</i> and which authorises <i>production</i>?</div>
+  </article>
+
+  <article class="act">
+    <header><h3>1 &middot; Push versus pull</h3><span class="time">25 min</span></header>
+    <p>Load <b>Activity 1: push</b>. Station 1 now produces to an MRP schedule built on the planned demand D = 48/day, and the handler pushes every finished container to Assembly. Run each case below, record the results, and save each run.</p>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Run</th><th>Control system</th><th>Actual vs plan</th><th>Pattern</th><th class="n">Fill rate</th><th class="n">Avg WIP</th><th class="n">Max WIP</th><th class="n">Stn 1 util.</th></tr></thead>
+      <tbody>
+        <tr><td>1a</td><td>Push</td><td>0%</td><td>Steady</td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>1b</td><td>Push</td><td>&minus;15%</td><td>Steady</td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>1c</td><td>Push</td><td>+15%</td><td>Steady</td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>1d</td><td>Two-card (Kc = 2, Kp = 2)</td><td>&minus;15%</td><td>Steady</td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>1e</td><td>Two-card (Kc = 2, Kp = 2)</td><td>+15%</td><td>Steady</td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>1f</td><td>Push, then two-card</td><td>0%</td><td>Random, seeds 1&ndash;3</td><td></td><td></td><td></td><td></td></tr>
+      </tbody></table></div>
+    <div class="q"><b>Q1.1</b> In run 1b, where does the inventory pile up, and why does the push system not correct itself?</div>
+    <div class="q"><b>Q1.2</b> In run 1d, Station 1 utilisation falls. Is an idle machine a problem in a pull system? Link your answer to rule 2 on the lecture slide.</div>
+    <div class="q"><b>Q1.3</b> Which system puts a ceiling on WIP? Work out what that ceiling is from Kc, Kp and Q, then check it against Max WIP.</div>
+  </article>
+
+  <article class="act">
+    <header><h3>2 &middot; Size the kanbans from a time study</h3><span class="time">25 min</span></header>
+    <p>An industrial engineer timed both kanban loops. Use the lecture formulas: <span class="formula">Kc = D(C)/Q</span>, <span class="formula">Kp = D(P)/Q</span>, <span class="formula">K = D(LT)(1+X)/Q</span>, with times converted to days (1 day = 480 min).</p>
+    <div class="twocol">
+      <div class="tbl-wrap"><table>
+        <thead><tr><th colspan="2">C-kanban loop</th><th class="n">min</th></tr></thead>
+        <tbody>
+          <tr><td>a</td><td>waits in C-mailbox (collected hourly)</td><td class="n">30</td></tr>
+          <tr><td>b</td><td>moves to Station 1</td><td class="n">15</td></tr>
+          <tr><td>c</td><td>moves back to Station 2</td><td class="n">15</td></tr>
+          <tr><td>d</td><td>waits in inbound buffer</td><td class="n">20</td></tr>
+        </tbody></table></div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th colspan="2">P-kanban loop</th><th class="n">min</th></tr></thead>
+        <tbody>
+          <tr><td>a</td><td>waits in P-mailbox (checked every 30 min)</td><td class="n">15</td></tr>
+          <tr><td>b, c</td><td>order post (none at this cell)</td><td class="n">0</td></tr>
+          <tr><td>d</td><td>process: setup 15 + run 3 min/unit</td><td class="n">?</td></tr>
+          <tr><td>e</td><td>move to outbound buffer</td><td class="n">0</td></tr>
+          <tr><td>f</td><td>container waits in outbound buffer</td><td class="n">15</td></tr>
+        </tbody></table></div>
+    </div>
+    <ol>
+      <li>Choose Q with the 10%-of-daily-demand rule (round up).</li>
+      <li>Calculate C (min and days) and Kc. Round up.</li>
+      <li>Calculate the processing time d, then P and Kp. Round up.</li>
+      <li>Calculate the total K for the loop with a safety factor X = 10%.</li>
+      <li>Load <b>Activity 2</b>, enter your Q, Kc and Kp, and run 10 days with steady demand. Save the run.</li>
+      <li>Now remove one kanban: run Kc &minus; 1 (with your Kp), then Kp &minus; 1 (with your Kc). Save both.</li>
+    </ol>
+    <p>Check your arithmetic on the <b>Kanban calculator</b> tab only after you have done it by hand.</p>
+    <div class="q"><b>Q2.1</b> Did your rounded-up kanbans give 100% fill rate? What happened when you removed one, and in which loop did the failure show up first?</div>
+    <div class="q"><b>Q2.2</b> Compare the time study with the <b>measured</b> tables under the chart. Why is the measured waiting time d (C loop) or f (P loop) longer than the time study? Hint: multiply Kc &times; Q &divide; D and compare with the measured total C.</div>
+  </article>
+
+  <article class="act">
+    <header><h3>3 &middot; Variability and breakdowns</h3><span class="time">25 min</span></header>
+    <p>Real demand is not evenly spaced. Load <b>Activity 3: random demand</b>. From now on use <b>Run seeds 1&ndash;3 &amp; save</b>: the log records the <i>worst</i> fill rate across three different weeks of customer orders.</p>
+    <ol>
+      <li>Run Kc = 2, Kp = 2. Record the worst fill rate.</li>
+      <li>Add kanbans one at a time. Find the smallest Kc + Kp that gives a worst fill rate of at least 98%. Does an extra C-kanban or an extra P-kanban help more?</li>
+      <li>Load <b>Activity 3: random demand + breakdowns</b> (machine fails on average every 4 h of running, 45 min to repair). Repeat step 2.</li>
+      <li>Work out the safety factor your answer implies: <span class="formula">X = (Kc + Kp) &divide; (D(P+C)/Q) &minus; 1</span>, using P and C from Activity 2.</li>
+    </ol>
+    <div class="q"><b>Q3.1</b> The lecture suggests starting with X &asymp; 10%. How does your X compare, with and without breakdowns? What does this tell you about where safety stock really comes from?</div>
+    <div class="q"><b>Q3.2</b> Which special card from the lecture (express, temporary or odd-number) would you use when the machine breaks down, and what would it trigger?</div>
+  </article>
+
+  <article class="act">
+    <header><h3>4 &middot; Improvement challenge</h3><span class="time">25 min</span></header>
+    <p>Load <b>Activity 4</b> (random demand + breakdowns). Management wants less inventory without letting customers down.</p>
+    <ul>
+      <li><b>Goal:</b> lowest average WIP with a worst fill rate &ge; 98% over seeds 1&ndash;3.</li>
+      <li><b>You may change:</b> Q, Kc, Kp, and the handler's collection round (60 or 30 min).</li>
+      <li><b>One kaizen project allowed:</b> a SMED workshop that cuts setup from 15 to 5 min.</li>
+      <li><b>Constraint:</b> Station 1 utilisation must stay below 85%.</li>
+      <li><b>Baseline to beat:</b> Q = 5, Kc = 4, Kp = 3.</li>
+    </ul>
+    <p>Save your best design in the log with seeds 1&ndash;3, then present it to the class in two minutes: settings, worst fill rate, average WIP, and why it works.</p>
+    <div class="q"><b>Q4.1</b> Try Q = 2 with the original 15-min setup. What happens to Station 1, and why? Connect this to the lot-sizing tutorial.</div>
+    <div class="q"><b>Q4.2</b> Toyota deliberately removes kanbans to expose problems. Which problem did removing kanbans expose in your model, and what improvement fixed it?</div>
+  </article>
+
+  <article class="act">
+    <header><h3>Wrap-up</h3><span class="time">10 min</span></header>
+    <ol>
+      <li>In one sentence: why does pull keep WIP bounded when push does not?</li>
+      <li>Name two improvements that would let you safely remove a kanban from this line.</li>
+      <li>What does this model leave out that a real line would have? Think about rule 4 (build-in quality), several part numbers, and the handler's capacity.</li>
+    </ol>
+  </article>
+</section>
+
+<!-- ================= CALCULATOR ================= -->
+<section id="pane-calc" hidden>
+  <h2>Kanban calculator</h2>
+  <p class="sub" style="margin-bottom:14px">Check your hand calculation. Times in minutes; 1 day = 480 min. Pre-filled with the lecture example.</p>
+  <div class="calc">
+    <div class="panel"><fieldset style="border-top:0;padding-top:0"><legend>Demand &amp; container</legend>
+      <div class="fld"><label for="kD">D (units/day)</label><input id="kD" type="number" value="21" step="any"></div>
+      <div class="fld"><label for="kQ">Q (units)</label><input id="kQ" type="number" value="3" step="any"></div>
+      <div class="fld"><label for="kX">X, safety factor (%)</label><input id="kX" type="number" value="10" step="any"></div>
+      <div class="fld"><label for="kDay">Minutes per day</label><input id="kDay" type="number" value="480" step="any"></div>
+    </fieldset></div>
+    <div class="panel"><fieldset style="border-top:0;padding-top:0"><legend>C loop (min)</legend>
+      <div class="fld"><label for="ca">a, in mailbox</label><input id="ca" type="number" value="32" step="any"></div>
+      <div class="fld"><label for="cb">b, to upstream</label><input id="cb" type="number" value="52" step="any"></div>
+      <div class="fld"><label for="cc">c, back downstream</label><input id="cc" type="number" value="60" step="any"></div>
+      <div class="fld"><label for="cd">d, in inbound buffer</label><input id="cd" type="number" value="48" step="any"></div>
+    </fieldset></div>
+    <div class="panel"><fieldset style="border-top:0;padding-top:0"><legend>P loop (min)</legend>
+      <div class="fld"><label for="pa">a, in P-mailbox</label><input id="pa" type="number" value="15" step="any"></div>
+      <div class="fld"><label for="pbc">b + c, order post</label><input id="pbc" type="number" value="1" step="any"></div>
+      <div class="fld"><label for="ps">Setup</label><input id="ps" type="number" value="6" step="any"></div>
+      <div class="fld"><label for="pr">Run (min/unit)</label><input id="pr" type="number" value="3" step="any"></div>
+      <div class="fld"><label for="pe">e, to outbound</label><input id="pe" type="number" value="0" step="any"></div>
+      <div class="fld"><label for="pf">f, in outbound</label><input id="pf" type="number" value="17" step="any"></div>
+    </fieldset></div>
+    <div class="panel out" id="calcOut"></div>
+  </div>
+</section>
+
+<!-- ================= LOG ================= -->
+<section id="pane-log" hidden>
+  <div class="bar" style="justify-content:space-between;margin-bottom:10px">
+    <h2 style="margin:0">Run log</h2>
+    <div class="bar"><button class="btn" id="copyCsv">Copy as CSV</button><button class="btn" id="clearLog">Clear log</button></div>
+  </div>
+  <p class="sub" style="margin-bottom:10px">Saved in this browser only. Use Copy as CSV to paste into Excel or your report. Push runs have no kanbans, so Kc and Kp show &ndash;. For single-card runs, Kp shows the cap on full containers at Machining.</p>
+  <div class="panel tbl-wrap"><table id="logTable"></table></div>
+  <div id="clearConfirm" class="bar" hidden style="margin-top:10px"><span>Delete all saved runs?</span><button class="btn" id="clearYes">Delete</button><button class="btn" id="clearNo">Keep</button></div>
+</section>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+// Kanban pull-system simulation engine (1-minute time steps, 480-minute day)
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+class KanbanSim {
+  constructor(p){
+    this.p = Object.assign({}, p);
+    const P = this.p;
+    this.DAY = 480;
+    this.T = Math.round(P.days * this.DAY);
+    this.sampleEvery = this.T <= 960 ? 1 : 10;
+    this.t = 0;
+    this.rD = mulberry32(P.seed * 7919 + 1);
+    this.rF = mulberry32(P.seed * 104729 + 2);
+    this.Dact = P.D * (1 + (P.demandPct||0)/100);
+    this.demandAcc = 0; this.schedAcc = 0;
+    this.inbound = []; this.outbound = [];
+    this.openUnits = 0;
+    this.cMailbox = []; this.pMailbox = []; this.pendingS1 = [];
+    this.queue = []; this.machine = null; this.moving = [];
+    this.handler = {state:'home', carry:[], load:[], arriveAt:0, departAt:0};
+    this.backlog = 0;
+    this.st = {demand:0, immediate:0, served:0, produced:0, busy:0, down:0, wipSum:0, inSum:0, outSum:0, maxWip:0, maxBacklog:0, stockoutMin:0, trips:0};
+    this.cCycles = []; this.pCycles = [];
+    this.series = {t:[], inb:[], out:[], wip:[], back:[]};
+    this.events = [];
+    let id = 0;
+    const two = P.mode === 'two', card = P.mode !== 'push';
+    for (let i=0;i<P.Kc;i++){
+      const c = card ? {type:'C', id:++id, deliveredAt:0, fresh:true} : null;
+      this.inbound.push({card:c, arrivedAt:0});
+    }
+    for (let i=0;i<P.Kp;i++){
+      const c = two ? {type:'P', id:++id, fresh:true} : null;
+      this.outbound.push({card:c, outAt:0});
+    }
+    this.record();
+  }
+  log(msg){ this.events.push({t:this.t, msg}); if(this.events.length>200) this.events.shift(); }
+  takeUnit(){
+    if (this.openUnits>0){ this.openUnits--; return true; }
+    if (this.inbound.length){
+      const ct = this.inbound.shift();
+      if (ct.card){
+        const c = ct.card;
+        if (!c.fresh){
+          const cyc = {a:c.collectedAt-c.postedAt, b:c.atS1At-c.collectedAt, w:c.attachedAt-c.atS1At, c:c.deliveredAt-c.departS1At, d:this.t-c.deliveredAt};
+          cyc.total = this.t - c.postedAt; this.cCycles.push(cyc);
+        }
+        c.fresh = false; c.postedAt = this.t;
+        this.cMailbox.push(c);
+      }
+      this.openUnits = this.p.Q - 1;
+      return true;
+    }
+    return false;
+  }
+  demandThisMinute(){
+    if (this.p.pattern === 'random'){
+      const L = Math.exp(-this.Dact/this.DAY); let k=0, pr=1;
+      do { k++; pr *= this.rD(); } while (pr > L); return k-1;
+    }
+    this.demandAcc += this.Dact/this.DAY; let n = Math.floor(this.demandAcc + 1e-9); this.demandAcc -= n; return n;
+  }
+  handlerTick(){
+    const P = this.p, h = this.handler, t = this.t;
+    for (let guard=0; guard<4; guard++){
+      if (h.state==='home'){
+        if (t % Math.max(1,P.hInt) !== 0) return;
+        if (P.mode==='push'){ if (!this.outbound.length) return; }
+        else if (!this.cMailbox.length && !this.pendingS1.length) return;
+        h.carry = this.cMailbox.splice(0); h.carry.forEach(c=>c.collectedAt=t);
+        h.state='up'; h.departAt=t; h.arriveAt=t+P.b; this.st.trips++;
+        if (P.b>0) return; continue;
+      }
+      if (h.state==='up'){
+        if (t < h.arriveAt) return;
+        h.carry.forEach(c=>c.atS1At=t);
+        h.load=[];
+        if (P.mode==='push'){ h.load = this.outbound.splice(0); }
+        else {
+          const pend = this.pendingS1.concat(h.carry); h.carry=[]; this.pendingS1=[];
+          for (const c of pend){
+            if (this.outbound.length){
+              const ct = this.outbound.shift();
+              if (ct.card){ // P-kanban removed -> P mailbox
+                const pc = ct.card;
+                if (!pc.fresh){ pc.cyc.f = t - ct.outAt; pc.cyc.total = t - pc.postedAt; this.pCycles.push(pc.cyc); }
+                pc.fresh=false; pc.postedAt=t; pc.cyc={}; this.pMailbox.push(pc);
+              }
+              c.attachedAt=t; c.departS1At=t; h.load.push({card:c});
+            } else this.pendingS1.push(c);
+          }
+        }
+        h.state='down'; h.leftS1At=t; h.arriveAt=t+P.c;
+        if (P.c>0) return; continue;
+      }
+      if (h.state==='down'){
+        if (t < h.arriveAt) return;
+        for (const ct of h.load){ if (ct.card){ ct.card.deliveredAt=t; } this.inbound.push({card:ct.card, arrivedAt:t}); }
+        h.load=[]; h.state='home';
+        return;
+      }
+    }
+  }
+  s1Tick(){
+    const P = this.p, t = this.t;
+    // orders
+    if (P.mode==='two'){
+      if (t % Math.max(1,P.pInt) === 0 && this.pMailbox.length){
+        for (const c of this.pMailbox){ c.cyc.a = t - c.postedAt; c.collectedAt=t; this.queue.push({card:c, at:t}); }
+        this.pMailbox=[];
+      }
+    } else {
+      this.schedAcc += P.D/(this.DAY*P.Q);
+      while (this.schedAcc >= 1 - 1e-9){ this.schedAcc -= 1; this.queue.push({card:null, at:t}); }
+    }
+    // start job
+    if (!this.machine && this.queue.length){
+      const capOK = P.mode!=='single' || (this.outbound.length + this.moving.length) < P.Kp;
+      if (capOK){ const j=this.queue.shift(); j.start=t; j.left=P.setup + P.Q*P.run; this.machine={job:j, repair:0};
+        if (j.card) j.card.cyc.q = t - j.at; }
+    }
+    // process
+    if (this.machine){
+      const m = this.machine;
+      if (m.repair>0){ m.repair--; this.st.down++; }
+      else if (P.mtbf>0 && this.rF() < 1/(P.mtbf*60)){
+        m.repair = Math.max(1, Math.round(-Math.log(1-this.rF()) * P.mttr)); this.st.down++;
+        this.log('Machine breakdown at Station 1');
+      } else {
+        m.job.left--; this.st.busy++;
+        if (m.job.left<=0){
+          const j=m.job; if (j.card) j.card.cyc.d = t+1 - j.start;
+          this.moving.push({card:j.card, at:t+1+P.e, s:t+1}); this.machine=null; this.st.produced+=P.Q;
+        }
+      }
+    }
+  }
+  arrivals(){
+    const t=this.t;
+    this.moving = this.moving.filter(mv=>{ if (mv.at<=t){ if(mv.card) mv.card.cyc.e = t - mv.s; this.outbound.push({card:mv.card, outAt:t}); return false;} return true; });
+  }
+  units(){
+    const Q=this.p.Q, h=this.handler;
+    const inb = this.inbound.length*Q + this.openUnits;
+    const out = this.outbound.length*Q;
+    const proc = (this.machine?Q:0) + this.moving.length*Q + (h.load?h.load.length*Q:0);
+    return {inb, out, proc, wip: inb+out+proc};
+  }
+  record(){
+    const u=this.units();
+    this.series.t.push(this.t/this.DAY); this.series.inb.push(u.inb); this.series.out.push(u.out); this.series.wip.push(u.wip); this.series.back.push(this.backlog);
+  }
+  step(){
+    if (this.t >= this.T) return false;
+    this.arrivals();
+    // customer demand at Station 2
+    const n = this.demandThisMinute();
+    while (this.backlog>0 && this.takeUnit()){ this.backlog--; this.st.served++; }
+    const hadBack=this.backlog>0;
+    for (let i=0;i<n;i++){ this.st.demand++; if (this.backlog===0 && this.takeUnit()){ this.st.immediate++; this.st.served++; } else { this.backlog++; } }
+    if(!hadBack && this.backlog>0) this.log('Assembly starved: customer demand on backorder');
+    this.handlerTick();
+    this.s1Tick();
+    this.arrivals();
+    const u=this.units();
+    this.st.wipSum+=u.wip; this.st.inSum+=u.inb; this.st.outSum+=u.out;
+    if (u.wip>this.st.maxWip) this.st.maxWip=u.wip;
+    if (this.backlog>this.st.maxBacklog) this.st.maxBacklog=this.backlog;
+    if (this.backlog>0) this.st.stockoutMin++;
+    this.t++;
+    if (this.t % this.sampleEvery === 0) this.record();
+    return true;
+  }
+  runAll(){ while(this.step()); return this.results(); }
+  results(){
+    const s=this.st, n=Math.max(1,this.t), avg=(arr,k)=>arr.length?arr.reduce((a,x)=>a+(x[k]||0),0)/arr.length:null;
+    const C = ['a','b','w','c','d','total'].reduce((o,k)=>(o[k]=avg(this.cCycles,k),o),{});
+    const Pc = ['a','q','d','e','f','total'].reduce((o,k)=>(o[k]=avg(this.pCycles,k),o),{});
+    return {
+      fillRate: s.demand? s.immediate/s.demand : 1,
+      demand:s.demand, served:s.served, backlog:this.backlog, maxBacklog:s.maxBacklog,
+      stockoutPct: s.stockoutMin/n, avgWip:s.wipSum/n, maxWip:s.maxWip, avgIn:s.inSum/n, avgOut:s.outSum/n,
+      util: s.busy/n, downPct: s.down/n, produced:s.produced, trips:s.trips,
+      C, P:Pc, nC:this.cCycles.length, nP:this.pCycles.length,
+    };
+  }
+}
+if (typeof module!=='undefined') module.exports = {KanbanSim};
+
+
+const $=id=>document.getElementById(id);
+const FIELDS=['D','demandPct','pattern','Q','Kc','Kp','setup','run','pInt','e','hInt','b','c','mtbf','mttr','runLen','runUnit','seed'];
+const BASE={mode:'two',D:48,demandPct:0,pattern:'steady',Q:5,Kc:2,Kp:2,setup:15,run:3,pInt:30,e:0,hInt:60,b:15,c:15,mtbf:0,mttr:45,runLen:10,runUnit:'days',seed:1};
+const PRESETS={
+  base:{},
+  a1push:{mode:'push'},
+  a2:{},
+  a3:{pattern:'random'},
+  a3bd:{pattern:'random',mtbf:4,mttr:45},
+  a4:{pattern:'random',mtbf:4,mttr:45,Kc:4,Kp:3},
+};
+let params={...BASE};
+let sim=null, playing=false, lastTs=0, acc=0;
+
+function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
+function readParams(){
+  const p={mode:params.mode};
+  for(const f of FIELDS){const el=$(f); p[f]= el.tagName==='SELECT'? el.value : Number(el.value);}
+  p.Q=Math.max(1,Math.round(p.Q)); p.Kc=Math.max(0,Math.round(p.Kc)); p.Kp=Math.max(0,Math.round(p.Kp));
+  if(p.runUnit==='hours'){p.runLen=Math.max(1,Math.min(480,Math.round(p.runLen)||1));p.days=p.runLen/8;}else{p.runLen=Math.max(1,Math.min(60,Math.round(p.runLen)||1));p.days=p.runLen;} p.seed=Math.max(1,Math.round(p.seed)||1);
+  return p;
+}
+function writeParams(p){for(const f of FIELDS){$(f).value=p[f];} setMode(p.mode,false);}
+function setMode(m,rebuild=true){
+  params.mode=m;
+  document.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.mode===m));
+  const lab={two:['Kc, C-kanbans','Kp, P-kanbans'],single:['Kc, C-kanbans','Max full containers at Machining'],push:['Starting containers at Assembly','Starting containers at Machining']}[m];
+  $('KcLab').textContent=lab[0]; $('KpLab').textContent=lab[1];
+  $('pInt').disabled = m!=='two';
+  $('planHint').textContent = m==='two' ? 'Pull ignores the plan: only actual consumption sends signals upstream.'
+    : m==='single' ? 'Machining follows an MRP schedule at the planned rate, capped by its outbound limit. Moves are pulled by C-kanbans.'
+    : 'Machining follows an MRP schedule at the planned rate. The handler pushes every finished container to Assembly on each round.';
+  if(rebuild) resetSim();
+}
+function capText(p){
+  const perCont=p.setup+p.Q*p.run, load=(p.D*(1+p.demandPct/100)/p.Q)*perCont/480;
+  const cls= load>=1?'bad':load>0.85?'warn':'good';
+  return `<span class="pill ${cls}">Capacity check</span> Station 1 needs ${(load*100).toFixed(0)}% of its time: ${(p.D*(1+p.demandPct/100)/p.Q).toFixed(1)} containers/day &times; (${p.setup} + ${p.Q}&times;${p.run}) min.`;
+}
+function resetSim(){
+  params=readParams(); sim=new KanbanSim(params); playing=false; $('play').textContent='Play';
+  $('capCheck').innerHTML=capText(params);
+  renderAll();
+}
+
+/* ---------- diagram ---------- */
+function containers(x,y,list,cols,maxShow,kind){
+  let s='', n=list.length, show=Math.min(n,maxShow);
+  for(let i=0;i<show;i++){
+    const cx=x+(i%cols)*34, cy=y-Math.floor(i/cols)*30;
+    s+=`<rect x="${cx}" y="${cy}" width="28" height="22" rx="2" fill="var(--sunk)" stroke="var(--muted)" stroke-width="1.2"/>`;
+    const card=list[i].card;
+    if(card) s+=`<rect x="${cx+17}" y="${cy-5}" width="9" height="13" rx="1" fill="var(${card.type==='C'?'--ckan':'--pkan'})"/>`;
+  }
+  if(n>maxShow) s+=`<text x="${x+cols*34+2}" y="${y+16}" font-size="13" fill="var(--ink)" font-family="var(--f-mono)">+${n-maxShow}</text>`;
+  return s;
+}
+function mailbox(x,y,cards,label,color){
+  let s=`<rect x="${x}" y="${y}" width="56" height="34" rx="3" fill="var(--surface)" stroke="var(--muted)"/>
+  <text x="${x+28}" y="${y+48}" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="var(--f-body)">${label}</text>`;
+  const n=cards.length;
+  for(let i=0;i<Math.min(n,5);i++) s+=`<rect x="${x+6+i*9}" y="${y+8}" width="8" height="18" rx="1" fill="var(${color})"/>`;
+  if(n) s+=`<text x="${x+52}" y="${y-4}" text-anchor="end" font-size="12" fill="var(--ink)" font-family="var(--f-mono)">${n}</text>`;
+  return s;
+}
+function drawDiagram(){
+  const S=sim, P=S.p, h=S.handler, t=S.t;
+  let s=`<svg viewBox="0 0 920 296" role="img" aria-label="Line state">`;
+  // floor path
+  s+=`<line x1="250" y1="230" x2="640" y2="230" stroke="var(--line)" stroke-width="10" stroke-linecap="round"/>`;
+  // Station 1
+  const m=S.machine; let st='Idle', stc='--muted', prog=0;
+  if(m){ const tot=P.setup+P.Q*P.run, left=m.job.left; prog=1-left/tot;
+    if(m.repair>0){st='Breakdown';stc='--bad';} else if(left>P.Q*P.run){st='Setup';stc='--warn';} else {st='Running';stc='--good';} }
+  s+=`<rect x="8" y="70" width="180" height="120" rx="4" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+   <text x="32" y="94" font-size="15" font-weight="700" fill="var(--ink)" font-family="var(--f-display)">STATION 1 · MACHINING</text>
+   <circle cx="38" cy="116" r="6" fill="var(${stc})"/><text x="50" y="121" font-size="14" fill="var(--ink)" font-family="var(--f-body)">${st}</text>
+   <rect x="32" y="132" width="126" height="10" rx="2" fill="var(--sunk)"/><rect x="32" y="132" width="${(126*prog).toFixed(1)}" height="10" rx="2" fill="var(${stc})"/>
+   <text x="32" y="166" font-size="12.5" fill="var(--muted)" font-family="var(--f-body)">Orders waiting: <tspan font-family="var(--f-mono)" fill="var(--ink)">${S.queue.length}</tspan></text>
+   <text x="32" y="182" font-size="12.5" fill="var(--muted)" font-family="var(--f-body)">Made: <tspan font-family="var(--f-mono)" fill="var(--ink)">${S.st.produced}</tspan> units</text>`;
+  if(P.mode==='two') s+=mailbox(60,18,S.pMailbox,'P-mailbox','--pkan');
+  else s+=`<text x="30" y="40" font-size="12.5" fill="var(--muted)" font-family="var(--f-body)">MRP schedule: ${P.D}/day</text>`;
+  // outbound buffer
+  s+=`<text x="205" y="78" font-size="12" fill="var(--muted)" font-family="var(--f-body)">Outbound buffer</text>`;
+  s+=containers(205,160,S.outbound,4,12,'out');
+  if(S.pendingS1.length) s+=mailbox(205,195,S.pendingS1,'C-cards waiting for stock','--ckan');
+  // inbound buffer
+  s+=`<text x="560" y="78" font-size="12" fill="var(--muted)" font-family="var(--f-body)">Inbound buffer</text>`;
+  s+=containers(560,160,S.inbound,4,12,'in');
+  // Station 2
+  const fill=S.openUnits/P.Q;
+  s+=`<rect x="715" y="70" width="190" height="120" rx="4" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+   <text x="732" y="94" font-size="16" font-weight="700" fill="var(--ink)" font-family="var(--f-display)">STATION 2 · ASSEMBLY</text>
+   <text x="732" y="116" font-size="12.5" fill="var(--muted)" font-family="var(--f-body)">Open container</text>
+   <rect x="732" y="124" width="40" height="40" rx="2" fill="var(--sunk)" stroke="var(--muted)"/>
+   <rect x="732" y="${124+40*(1-fill)}" width="40" height="${40*fill}" fill="var(--muted)" opacity=".55"/>
+   <text x="782" y="150" font-size="14" fill="var(--ink)" font-family="var(--f-mono)">${S.openUnits}/${P.Q}</text>
+   <text x="732" y="182" font-size="12.5" fill="var(--muted)" font-family="var(--f-body)">Backorders: <tspan font-family="var(--f-mono)" font-weight="700" fill="var(${S.backlog?'--bad':'--ink'})">${S.backlog}</tspan></text>`;
+  s+=`<text x="800" y="240" text-anchor="middle" font-size="12.5" fill="var(--muted)" font-family="var(--f-body)">Customer demand</text>
+     <text x="800" y="258" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="var(--f-mono)">${S.st.demand} ordered</text>`;
+  if(P.mode!=='push') s+=mailbox(760,18,S.cMailbox,'C-mailbox','--ckan');
+  // handler
+  let hx=640, label='At Assembly';
+  if(h.state==='up'){const f=P.b?Math.min(1,(t-h.departAt)/P.b):1; hx=640-390*f; label='To Machining';}
+  else if(h.state==='down'){const f=P.c?Math.min(1,(t-h.leftS1At)/P.c):1; hx=250+390*f; label='To Assembly';}
+  s+=`<g transform="translate(${hx.toFixed(1)},230)"><circle r="13" fill="var(--steel)"/><text y="5" text-anchor="middle" font-size="13" font-weight="700" fill="var(--steel-ink)" font-family="var(--f-display)">MH</text>`;
+  const carry=h.state==='up'?h.carry:[]; const load=h.state==='down'?h.load:[];
+  carry.forEach((c,i)=>{s+=`<rect x="${-6+i*7}" y="-34" width="6" height="14" rx="1" fill="var(--ckan)"/>`;});
+  load.forEach((c,i)=>{s+=`<rect x="${-14+i*16}" y="-38" width="14" height="12" rx="1" fill="var(--sunk)" stroke="var(--muted)"/>`; if(c.card) s+=`<rect x="${-6+i*16}" y="-42" width="5" height="9" fill="var(--ckan)"/>`;});
+  s+=`</g><text x="445" y="270" text-anchor="middle" font-size="12" fill="var(--muted)" font-family="var(--f-body)">Material handler: ${label} · round every ${P.hInt} min</text>`;
+  s+=`</svg>`;
+  $('diagram').innerHTML=s;
+  const day=Math.floor(t/480)+1, mm=t%480, hh=8+Math.floor(mm/60), mi=mm%60;
+  $('clock').textContent=t>=S.T?`Run complete · ${lenText(S.p)}`:`Day ${day} · ${String(hh).padStart(2,'0')}:${String(mi).padStart(2,'0')}`;
+}
+
+/* ---------- KPIs ---------- */
+function lenText(p){return p.runUnit==='hours'?`${p.runLen} h`:`${p.runLen} day${p.runLen>1?'s':''}`;}
+function pct(x){return (x*100).toFixed(1)+'%';}
+function drawKpis(){
+  const r=sim.results();
+  const fr=r.fillRate, fcls=fr>=.98?'good':fr>=.9?'warn':'bad', flab=fr>=.98?'On target':fr>=.9?'Below 98%':'Starving';
+  const u=r.util, ucls=u>.85?'bad':u>.75?'warn':'good';
+  const tiles=[
+    ['Fill rate',pct(fr),`${r.demand-Math.round(fr*r.demand)} of ${r.demand} orders not met from stock`,`<span class="pill ${fcls}">${flab}</span>`],
+    ['Average WIP',r.avgWip.toFixed(1),`units · ${(r.avgWip/sim.p.Q).toFixed(1)} containers`,''],
+    ['Max WIP',r.maxWip,'units at any moment',''],
+    ['Backorders',`${r.backlog}`,`now · max ${r.maxBacklog}`,r.backlog?'<span class="pill bad">Customers waiting</span>':''],
+    ['Station 1 utilisation',pct(u),`breakdown time ${pct(r.downPct)}`,`<span class="pill ${ucls}">${u>.85?'Overloaded':u>.75?'High':'OK'}</span>`],
+  ];
+  $('kpis').innerHTML=tiles.map(([l,v,s,p])=>`<div class="kpi"><span class="label">${l}</span><span class="v">${v}</span><span class="s">${s}</span>${p}</div>`).join('');
+}
+
+/* ---------- cycle tables ---------- */
+function fm(v){return v==null?'–':v.toFixed(1);}
+function drawTables(){
+  const r=sim.results(), P=sim.p;
+  if(P.mode==='push'){
+    $('cTable').innerHTML=`<tr><td>No kanbans in a push system. The handler moves every finished container on each round.</td></tr>`;
+    $('pTable').innerHTML=`<tr><td>No kanbans in a push system. Machining follows the MRP schedule.</td></tr>`; return;
+  }
+  const C=r.C;
+  const kc = C.total!=null ? (P.D*(1+P.demandPct/100)*(C.total/480)/P.Q) : null;
+  $('cTable').innerHTML=`<thead><tr><th>Time element</th><th class="n">avg min</th></tr></thead><tbody>
+   <tr><td>a · waits in C-mailbox</td><td class="n">${fm(C.a)}</td></tr>
+   <tr><td>b · moves to Station 1</td><td class="n">${fm(C.b)}</td></tr>
+   <tr><td>(waits at Station 1 for a full container)</td><td class="n">${fm(C.w)}</td></tr>
+   <tr><td>c · moves back to Station 2</td><td class="n">${fm(C.c)}</td></tr>
+   <tr><td>d · waits in inbound buffer</td><td class="n">${fm(C.d)}</td></tr>
+   <tr class="tot"><td>C, conveyance cycle (${r.nC} cycles)</td><td class="n">${fm(C.total)}</td></tr>
+   <tr><td>D(C)/Q with measured C</td><td class="n">${kc==null?'–':kc.toFixed(2)}</td></tr></tbody>`;
+  if(P.mode!=='two'){ $('pTable').innerHTML=`<tr><td>Single-card system: Machining has no P-kanbans. It follows the MRP schedule but stops when ${P.Kp} full containers are waiting in its outbound buffer.</td></tr>`; return; }
+  const Pc=r.P;
+  const kp = Pc.total!=null ? (P.D*(1+P.demandPct/100)*(Pc.total/480)/P.Q) : null;
+  $('pTable').innerHTML=`<thead><tr><th>Time element</th><th class="n">avg min</th></tr></thead><tbody>
+   <tr><td>a · waits in P-mailbox</td><td class="n">${fm(Pc.a)}</td></tr>
+   <tr><td>b + c · order post / queue at machine</td><td class="n">${fm(Pc.q)}</td></tr>
+   <tr><td>d · process (setup + run + repairs)</td><td class="n">${fm(Pc.d)}</td></tr>
+   <tr><td>e · moves to outbound buffer</td><td class="n">${fm(Pc.e)}</td></tr>
+   <tr><td>f · waits in outbound buffer</td><td class="n">${fm(Pc.f)}</td></tr>
+   <tr class="tot"><td>P, production cycle (${r.nP} cycles)</td><td class="n">${fm(Pc.total)}</td></tr>
+   <tr><td>D(P)/Q with measured P</td><td class="n">${kp==null?'–':kp.toFixed(2)}</td></tr></tbody>`;
+}
+function drawEvents(){
+  const ev=sim.events.slice(-30).reverse();
+  $('events').innerHTML= ev.length? ev.map(e=>{const d=Math.floor(e.t/480)+1,mm=e.t%480;return `<li>Day ${d} ${String(8+Math.floor(mm/60)).padStart(2,'0')}:${String(mm%60).padStart(2,'0')} · ${e.msg}</li>`;}).join('') : '<li>No disruptions yet.</li>';
+}
+
+/* ---------- chart ---------- */
+let chartGeom=null;
+function drawChart(){
+  const cv=$('chart'), dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight;
+  cv.width=W*dpr; cv.height=H*dpr; const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,W,H);
+  const s=sim.series, days=sim.p.days;
+  const L=44,R=16,T=10,B=28, pw=W-L-R, ph=H-T-B;
+  let ymax=Math.max(10,...s.wip,...s.back); const step=niceStep(ymax/5); ymax=Math.ceil(ymax/step)*step;
+  const X=d=>L+pw*d/days, Y=v=>T+ph*(1-v/ymax);
+  g.font='12px '+css('--f-mono'); g.fillStyle=css('--muted'); g.strokeStyle=css('--line'); g.lineWidth=1;
+  for(let v=0;v<=ymax+1e-9;v+=step){g.beginPath();g.moveTo(L,Y(v)+.5);g.lineTo(W-R,Y(v)+.5);g.stroke();g.textAlign='right';g.fillText(String(v),L-6,Y(v)+4);}
+  g.textAlign='center';
+  if(days<=1.5){const hrs=days*8, hstep=hrs<=8?1:2; for(let h=0;h<=hrs+1e-9;h+=hstep){g.fillText(h===0?'0 h':h+' h',X(h/8),H-8);}}
+  else{const dstep=days<=12?1:days<=30?5:10; for(let d=0;d<=days+1e-9;d+=dstep){g.fillText(d===0?'Day 0':String(d),X(d),H-8);}}
+  const line=(arr,col,w,dash)=>{g.strokeStyle=col;g.lineWidth=w;g.setLineDash(dash||[]);g.beginPath();arr.forEach((v,i)=>{const x=X(s.t[i]),y=Y(v);i?g.lineTo(x,y):g.moveTo(x,y);});g.stroke();g.setLineDash([]);};
+  line(s.out,css('--pkan'),2); line(s.inb,css('--ckan'),2); line(s.back,css('--back'),2,[5,4]); line(s.wip,css('--ink'),2.5);
+  const n=s.t.length-1; if(n>=0){g.fillStyle=css('--ink');g.beginPath();g.arc(X(s.t[n]),Y(s.wip[n]),4,0,7);g.fill();}
+  chartGeom={X,Y,L,R,W,H,days,pw};
+}
+function niceStep(x){const p=Math.pow(10,Math.floor(Math.log10(x))),f=x/p;return (f<=1?1:f<=2?2:f<=5?5:10)*p;}
+$('chart').addEventListener('mousemove',ev=>{
+  if(!chartGeom) return; const rect=ev.target.getBoundingClientRect(), x=ev.clientX-rect.left;
+  const d=(x-chartGeom.L)/chartGeom.pw*chartGeom.days, s=sim.series;
+  if(d<0||d>s.t[s.t.length-1]){ $('tip').hidden=true; drawChart(); return; }
+  const i=Math.min(s.t.length-1,Math.max(0,Math.round(d*480/sim.sampleEvery)));
+  drawChart(); const g=$('chart').getContext('2d'); g.strokeStyle=css('--muted'); g.lineWidth=1; g.beginPath(); g.moveTo(chartGeom.X(s.t[i]),10); g.lineTo(chartGeom.X(s.t[i]),chartGeom.H-28); g.stroke();
+  const tm=Math.round(s.t[i]*480), dd=Math.floor(tm/480)+1, mm=tm%480;
+  const tip=$('tip'); tip.hidden=false;
+  tip.innerHTML=`Day ${dd} ${String(8+Math.floor(mm/60)).padStart(2,'0')}:${String(mm%60).padStart(2,'0')}<br>Total WIP <span class="num">${s.wip[i]}</span><br>At Assembly <span class="num">${s.inb[i]}</span><br>At Machining <span class="num">${s.out[i]}</span><br>Backorders <span class="num">${s.back[i]}</span>`;
+  const px=chartGeom.X(s.t[i]); tip.style.left=(px>rect.width-150?px-150:px+12)+'px'; tip.style.top='12px';
+});
+$('chart').addEventListener('mouseleave',()=>{$('tip').hidden=true;drawChart();});
+
+function renderAll(){drawDiagram();drawKpis();drawTables();drawEvents();drawChart();}
+
+/* ---------- playback ---------- */
+function loop(ts){
+  if(!playing) return;
+  const dt=lastTs?(ts-lastTs)/1000:0; lastTs=ts;
+  acc+=dt*Number($('speed').value);
+  let n=Math.floor(acc); acc-=n;
+  while(n-->0 && sim.step());
+  renderAll();
+  if(sim.t>=sim.T){playing=false;$('play').textContent='Play';return;}
+  requestAnimationFrame(loop);
+}
+$('play').onclick=()=>{ if(sim.t>=sim.T) resetSim(); playing=!playing; $('play').textContent=playing?'Pause':'Play'; if(playing){lastTs=0;acc=0;requestAnimationFrame(loop);} };
+$('stepBtn').onclick=()=>{for(let i=0;i<10;i++) sim.step(); renderAll();};
+$('finish').onclick=()=>{playing=false;$('play').textContent='Play';sim.runAll();renderAll();};
+$('reset').onclick=resetSim;
+document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+FIELDS.forEach(f=>$(f).addEventListener('change',resetSim));
+$('preset').onchange=e=>{const k=e.target.value; if(!k) return; params={...BASE,...PRESETS[k]}; writeParams(params); resetSim(); e.target.value=''; toast('Preset loaded');};
+
+/* ---------- log ---------- */
+let LOG=[]; try{LOG=JSON.parse(localStorage.getItem('kanbanLog')||'[]');}catch(e){LOG=[];}
+function saveLog(){try{localStorage.setItem('kanbanLog',JSON.stringify(LOG));}catch(e){} drawLog();}
+const MODE_N={push:'Push',single:'Single-card',two:'Two-card'};
+function addRun(p,r,seeds){
+  LOG.push({n:LOG.length+1,mode:MODE_N[p.mode],D:p.D,pct:p.demandPct,pattern:p.pattern,Q:p.Q,Kc:p.mode==='push'?'–':p.Kc,Kp:p.mode==='push'?'–':(p.mode==='single'?'cap '+p.Kp:p.Kp),len:lenText(p),setup:p.setup,run:p.run,hInt:p.hInt,bd:p.mtbf?`${p.mtbf}h/${p.mttr}m`:'off',days:p.days,seeds,
+    fill:+(r.fillRate*100).toFixed(1),wip:+r.avgWip.toFixed(1),maxWip:r.maxWip,util:+(r.util*100).toFixed(1)});
+  saveLog();
+}
+$('save').onclick=()=>{ const p=readParams(); const r=new KanbanSim(p).runAll(); addRun(p,r,String(p.seed)); if(sim.t<sim.T){sim.runAll();renderAll();} toast(`Run ${LOG.length} saved (full ${lenText(p)})`); };
+$('seeds').onclick=()=>{ const p=readParams(); const rs=[1,2,3].map(s=>new KanbanSim({...p,seed:s}).runAll());
+  const r={fillRate:Math.min(...rs.map(x=>x.fillRate)),avgWip:rs.reduce((a,x)=>a+x.avgWip,0)/3,maxWip:Math.max(...rs.map(x=>x.maxWip)),util:rs.reduce((a,x)=>a+x.util,0)/3};
+  addRun(p,r,'1–3 (worst fill, avg WIP)'); toast(`Run ${LOG.length} saved: worst fill ${(r.fillRate*100).toFixed(1)}%, avg WIP ${r.avgWip.toFixed(1)}`); };
+const COLS=[['n','#'],['mode','System'],['D','D'],['pct','Actual %'],['pattern','Demand'],['len','Length'],['Q','Q'],['Kc','Kc'],['Kp','Kp'],['setup','Setup'],['hInt','Round'],['bd','Breakdowns'],['seeds','Seeds'],['fill','Fill %'],['wip','Avg WIP'],['maxWip','Max WIP'],['util','Util %']];
+function drawLog(){
+  $('logcount').textContent=LOG.length?`(${LOG.length})`:'';
+  if(!LOG.length){$('logTable').innerHTML='<tr><td>No runs saved yet. Run the model, then press <b>Save run to log</b>.</td></tr>';return;}
+  const num=new Set(['n','D','pct','Q','Kc','Kp','setup','hInt','fill','wip','maxWip','util']);
+  $('logTable').innerHTML='<thead><tr>'+COLS.map(([k,l])=>`<th class="${num.has(k)?'n':''}">${l}</th>`).join('')+'</tr></thead><tbody>'+
+   LOG.map(r=>'<tr>'+COLS.map(([k])=>{let v=r[k]; if(k==='fill'){const c=v>=98?'good':v>=90?'warn':'bad'; return `<td class="n"><span class="pill ${c}">${v}</span></td>`;} return `<td class="${num.has(k)?'n':''}">${v}</td>`;}).join('')+'</tr>').join('')+'</tbody>';
+}
+$('copyCsv').onclick=()=>{ const txt=[COLS.map(c=>c[1]).join(','),...LOG.map(r=>COLS.map(([k])=>`"${String(r[k]).replace(/"/g,'""')}"`).join(','))].join('\n');
+  navigator.clipboard.writeText(txt).then(()=>toast('Copied. Paste into Excel.')).catch(()=>{const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');toast('Copied. Paste into Excel.');}catch(e){toast('Select the table and copy it manually.');}ta.remove();}); };
+$('clearLog').onclick=()=>{$('clearConfirm').hidden=false;};
+$('clearNo').onclick=()=>{$('clearConfirm').hidden=true;};
+$('clearYes').onclick=()=>{LOG=[];saveLog();$('clearConfirm').hidden=true;toast('Log cleared');};
+
+/* ---------- calculator ---------- */
+function calc(){
+  const v=id=>Number($(id).value)||0, D=v('kD'),Q=v('kQ')||1,X=v('kX')/100,day=v('kDay')||480;
+  const C=v('ca')+v('cb')+v('cc')+v('cd'); const pd=v('ps')+Q*v('pr'); const P=v('pa')+v('pbc')+pd+v('pe')+v('pf');
+  const Kc=D*(C/day)/Q, Kp=D*(P/day)/Q, K=D*((P+C)/day)*(1+X)/Q, r=x=>x.toFixed(2);
+  $('calcOut').innerHTML=`<div class="label">Results</div>
+   C = ${C} min = ${r(C/day)} day<br>Kc = D(C)/Q = ${r(Kc)} &rarr; <b>${Math.ceil(Kc-1e-9)}</b><br>
+   d (process) = ${v('ps')} + ${Q}&times;${v('pr')} = ${pd} min<br>P = ${P} min = ${r(P/day)} day<br>Kp = D(P)/Q = ${r(Kp)} &rarr; <b>${Math.ceil(Kp-1e-9)}</b><br>
+   LT = P + C = ${P+C} min<br>K = D(LT)(1+X)/Q = ${r(K)} &rarr; <b>${Math.ceil(K-1e-9)}</b><br>
+   <span class="label">10% rule for Q:</span> ${r(D*0.1)} &rarr; ${Math.ceil(D*0.1-1e-9)} units`;
+}
+document.querySelectorAll('#pane-calc input').forEach(i=>i.addEventListener('input',calc));
+
+/* ---------- tabs & misc ---------- */
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('[data-tab]').forEach(x=>x.setAttribute('aria-selected',x===b));
+  ['model','acts','calc','log'].forEach(k=>$('pane-'+k).hidden= k!==b.dataset.tab);
+  if(b.dataset.tab==='model') drawChart();
+  try{localStorage.setItem('kanbanTab',b.dataset.tab);}catch(e){}
+});
+let toastT; function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>t.hidden=true,2200);}
+window.addEventListener('resize',drawChart);
+if(window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',renderAll);
+new MutationObserver(renderAll).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+
+writeParams(params); resetSim(); sim.runAll(); renderAll(); drawLog(); calc();
+try{const tb=localStorage.getItem('kanbanTab'); if(tb){const b=document.querySelector(`[data-tab="${tb}"]`); if(b) b.click();}}catch(e){}
+</script>
+
+</body>
+</html>
